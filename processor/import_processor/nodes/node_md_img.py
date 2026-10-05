@@ -109,7 +109,6 @@ def step_2_scan_images(md_content,md_images_dir_obj)->list[tuple[str, str, tuple
 @step_log("step_3_image_summary")
 def step_3_image_summary(image_info_list,root_folder)->dict[str,str]:
     """
-
     获取图片对应的摘要
     :param image_info_list:      图片信息列表
     :param root_folder:          md文件名称
@@ -163,6 +162,7 @@ def step_4_upload_images_get_url(image_info_list, stem) -> dict[str, str]:
     objects = minio_client.list_objects(
         bucket_name=minio_config.bucket_name,
         # /upload-images/文件名     注意：前缀在指定的时候，不能以/开始
+        #minio_config.minio_img_dir:MINIO_IMG_DIR=/upload-images
         prefix=minio_config.minio_img_dir[1:] + "/" + stem,
         recursive=True
     )
@@ -193,7 +193,6 @@ def step_4_upload_images_get_url(image_info_list, stem) -> dict[str, str]:
                 content_type=guess_type(image_name)[0]
             )
             image_url = f"http://{minio_config.endpoint}/{minio_config.bucket_name}{minio_config.minio_img_dir}/{stem}/{image_name}"
-            image_url_dict[image_name] = image_url
             image_url_dict[image_name] = image_url
             logger.debug(f"{image_name}已经完成上传,对应的地址为:{image_url}")
         except Exception as e:
