@@ -41,6 +41,9 @@ def step_1_validata_and_get_data(state)->tuple[list[dict[str,Any]],str]:
     chunks: list[dict[str,Any]] = state.get("chunks")
     #从State中取出文件标题（可能为空）
     file_title: str = state.get('file_title')
+    # 从State中获取md_path
+    md_path = state.get("md_path")
+    md_path_obj = Path(md_path)
 
     #如果chunks为空，尝试从md_path同目录下的JSON备份文件中恢复
     if not chunks:
@@ -147,7 +150,7 @@ def step_4_prepared_item_name_collection():
     #创建 schema：开启主键自增 + 允许动态字段（后续可扩展额外属性）
     schema = milvus_client.create_schema(
         auto_id=True,
-        enable_dynamic_filed=True
+        enable_dynamic_field=True
     )
     # 通过 schema 维护表中的字段（field）：
     # - pk            主键，INT64，自增

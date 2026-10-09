@@ -16,10 +16,6 @@ def node_entry(state: ImportGraphState) -> ImportGraphState:
     """
     节点: 入口节点 (node_entry)
     为什么叫这个名字: 作为图的 Entry Point，负责接收外部输入并决定流程走向。
-    未来要实现:
-    1. 接收文件路径。
-    2. 判断文件类型 (PDF/MD)。
-    3. 设置 state 中的路由标记 (is_pdf_read_enabled / is_md_read_enabled)。
     """
     # 模拟简单的路由逻辑，防止报错 (仅 node_entry 需要)
     # TODO . 节点添加到运行时列表
@@ -46,10 +42,12 @@ def node_entry(state: ImportGraphState) -> ImportGraphState:
     else:
         logger.warning("不支持的文件类型")
         return state
+
     #TODO.  更新filetitle
     state["file_title"] =Path(local_file_path).stem
     # TODO 6. 将节点添加到已完成列表
     add_done_task(state.get("task_id"),"node_entry")
+    return state
 
 if __name__ == '__main__':
     # 单元测试：覆盖不支持类型、MD、PDF三种场景
