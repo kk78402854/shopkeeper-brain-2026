@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一言 · Hitokoto</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(circle at 20% 20%, #1a1a3e 0%, #0a0a1a 45%, #000 100%);
+    color: #fff;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* 背景光晕 */
+  body::before, body::after {
+    content: "";
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(120px);
+    opacity: 0.55;
+    pointer-events: none;
+  }
+  body::before {
+    width: 520px; height: 520px;
+    background: #6a5cff;
+    top: -160px; left: -160px;
+    animation: float1 14s ease-in-out infinite;
+  }
+  body::after {
+    width: 460px; height: 460px;
+    background: #ff4ecd;
+    bottom: -140px; right: -140px;
+    animation: float2 16s ease-in-out infinite;
+  }
+
+  @keyframes float1 {
+    0%, 100% { transform: translate(0, 0); }
+    50% { transform: translate(120px, 80px); }
+  }
+  @keyframes float2 {
+    0%, 100% { transform: translate(0, 0); }
+    50% { transform: translate(-100px, -90px); }
+  }
+
+  .card {
+    position: relative;
+    z-index: 2;
+    width: min(720px, 92vw);
+    padding: 48px 44px 36px;
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow:
+      0 20px 60px rgba(0, 0, 0, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    text-align: center;
+    animation: cardIn 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes cardIn {
+    from { opacity: 0; transform: translateY(24px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .title {
+    font-size: 13px;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: 28px;
+    font-weight: 500;
+  }
+
+  .quote {
+    font-size: 24px;
+    line-height: 1.8;
+    font-weight: 500;
+    min-height: 90px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #fff 0%, #c4b5ff 60%, #ff9fe0 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    transition: opacity 0.35s ease;
+  }
+
+  .quote.fade { opacity: 0; }
+
+  .meta {
+    margin-top: 26px;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.55);
+    letter-spacing: 1px;
+    min-height: 20px;
+    transition: opacity 0.35s ease;
+  }
+
+  .meta .sep {
+    margin: 0 10px;
+    color: rgba(255, 255, 255, 0.25);
+  }
+
+  .meta .who {
+    color: rgba(180, 170, 255, 0.9);
+  }
+
+  /* 分类按钮 */
+  .cats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 34px;
+  }
+
+  .cat {
+    padding: 8px 18px;
+    border-radius: 999px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    cursor: pointer;
+    transition: all 0.25s ease;
+    user-select: none;
+  }
+
+  .cat:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    transform: translateY(-2px);
+  }
+
+  .cat.active {
+    background: linear-gradient(135deg, #6a5cff, #ff4ecd);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: 0 8px 24px rgba(122, 92, 255, 0.45);
+  }
+
+  /* 刷新按钮 */
+  .refresh {
+    margin-top: 26px;
+    padding: 12px 34px;
+    border: none;
+    border-radius: 999px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    cursor: pointer;
+    background: linear-gradient(135deg, #6a5cff, #ff4ecd);
+    box-shadow: 0 10px 30px rgba(122, 92, 255, 0.4);
+    transition: all 0.25s ease;
+  }
+
+  .refresh:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 38px rgba(122, 92, 255, 0.6);
+  }
+
+  .refresh:active {
+    transform: translateY(0) scale(0.98);
+  }
+
+  .refresh:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  /* 加载小点 */
+  .loading {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: -2px;
+    margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 520px) {
+    .card { padding: 36px 24px 28px; }
+    .quote { font-size: 19px; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="card">
+    <div class="title">H I T O K O T O</div>
+
+    <div class="quote" id="quote">点击下方按钮，开启今日一言</div>
+    <div class="meta" id="meta"></div>
+
+    <div class="cats" id="cats">
+      <div class="cat active" data-c="b">漫画</div>
+      <div class="cat" data-c="a">动画</div>
+      <div class="cat" data-c="c">游戏</div>
+      <div class="cat" data-c="d">小说</div>
+      <div class="cat" data-c="e">原创</div>
+      <div class="cat" data-c="f">网络</div>
+      <div class="cat" data-c="g">其他</div>
+    </div>
+
+    <button class="refresh" id="refresh">再来一句</button>
+  </div>
+
+<script>
+  const quoteEl = document.getElementById("quote");
+  const metaEl = document.getElementById("meta");
+  const refreshBtn = document.getElementById("refresh");
+  const catsEl = document.getElementById("cats");
+
+  let currentC = "b";
+  let loading = false;
+
+  async function loadHitokoto() {
+    if (loading) return;
+    loading = true;
+    refreshBtn.disabled = true;
+    refreshBtn.innerHTML = '<span class="loading"></span>加载中';
+
+    // 淡出
+    quoteEl.classList.add("fade");
+    metaEl.classList.add("fade");
+
+    try {
+      const res = await fetch(`/hitokoto?c=${currentC}`);
+      if (!res.ok) throw new Error("接口返回异常");
+      const data = await res.json();
+
+      // 等淡出完成再替换文本
+      setTimeout(() => {
+        quoteEl.textContent = data.hitokoto || "（暂无内容）";
+        let meta = "";
+        if (data.from) meta += `<span>—— ${data.from}</span>`;
+        if (data.from_who) {
+          meta += `<span class="sep">·</span><span class="who">${data.from_who}</span>`;
+        }
+        metaEl.innerHTML = meta;
+
+        quoteEl.classList.remove("fade");
+        metaEl.classList.remove("fade");
+      }, 320);
+
+    } catch (e) {
+      setTimeout(() => {
+        quoteEl.textContent = "加载失败，请稍后重试 😢";
+        metaEl.innerHTML = "";
+        quoteEl.classList.remove("fade");
+        metaEl.classList.remove("fade");
+      }, 320);
+    } finally {
+      loading = false;
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = "再来一句";
+    }
+  }
+
+  // 分类切换
+  catsEl.addEventListener("click", (e) => {
+    const target = e.target.closest(".cat");
+    if (!target) return;
+    document.querySelectorAll(".cat").forEach(el => el.classList.remove("active"));
+    target.classList.add("active");
+    currentC = target.dataset.c;
+    loadHitokoto();
+  });
+
+  refreshBtn.addEventListener("click", loadHitokoto);
+
+  // 首次加载
+  loadHitokoto();
+</script>
+</body>
+</html>
