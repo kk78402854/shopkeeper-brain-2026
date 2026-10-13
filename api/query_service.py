@@ -5,6 +5,7 @@
 """
 import json
 from datetime import datetime
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, BackgroundTasks
@@ -14,6 +15,7 @@ from starlette.responses import StreamingResponse, FileResponse
 
 from processor.query_processor.main_graph import query_app
 from processor.query_processor.state import create_query_default_state
+from utils.clients.mongo_history_utils import get_recent_messages
 from utils.path_util import PROJECT_ROOT
 from common.logging.logger import logger
 from utils.sse_utils import sse_generator, push_to_session, SSEEvent, create_sse_queue
@@ -147,7 +149,31 @@ def stream(session_id:str,request: Request):
     )
 
 # 获取当前会话历史记录   /history/${sessionId} --- get
+@app.get("/history/{session_id}")
+def history(session_id:str):
+    records : list[dict[str,Any]] = get_recent_messages(session_id)
+    logger.info(f"查询{session_id}的聊天记录,查询到:{len(records)}条!")
+    items = []
+    for r in records:
+        items.append({
+            "_id": str(r.get("_id")) if r.get("_id") is not None else "",
+            "session_id": session_id,
+            "role": r.get("role", ""),
+            "text": r.get("text", ""),
+            "rewritten_query": r.get("rewritten_query", ""),
+            "item_names": r.get("item_names", []),
+            "image_urls": r.get("image_urls", []),
+            "ts": r.get("ts")
+        })
+    return {
+        "session_id": session_id,
+        "items": items
+    }
 # 清空当前会话历史记录   /history/${sessionId} --- delete
-
+@app.delete("/history/{session_id}")
+def clear_chat_history(session_id:str):
+    deleted_count = clear_history(session_id)
+    logger.info(f"已经清空:{session_id}对应的聊天记录,删除的数量为:{deleted_count}")
+    return {"message": "History cleared", "deleted_count": deleted_count}
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8001)

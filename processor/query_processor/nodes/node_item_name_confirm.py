@@ -8,6 +8,7 @@ import sys
 
 from common.logging.logger import node_log,logger
 from processor.query_processor.state import QueryGraphState
+from utils.clients.mongo_history_utils import save_chat_message
 from utils.task_utils import add_running_task, add_done_task
 
 @node_log("node_item_name_confirm")
@@ -23,6 +24,15 @@ def node_item_name_confirm(state:QueryGraphState):
 
     # 后面会调用大模型，进行逻辑处理
     time.sleep(1)
+
+    save_chat_message(
+        session_id=state.get("session_id"),
+        role="user",
+        text=state.get("original_query"),
+        rewritten_query="这是重写的问题",
+        item_names=["商品A","商品B"],
+        image_urls=[]
+    )
     # 记录任务结束
     add_done_task(state["session_id"], sys._getframe().f_code.co_name,state["is_stream"])
 
