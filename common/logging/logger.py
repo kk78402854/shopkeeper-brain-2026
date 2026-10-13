@@ -89,7 +89,7 @@ def fix_log_position(record):
     """遍历调用栈，跳过loguru内部帧+工具类自身帧，提取业务代码实际调用位置"""
     for frame in inspect.stack():
         # 终极过滤：排除loguru内部 + 排除工具类logger.py自身，直接定位业务模块
-        if ("_logger.py" in frame.filename or frame.function == "_log") or "logging.py" in frame.filename:
+        if ("_logger.py" in frame.filename or frame.function == "_log") or "logger.py" in frame.filename:
             continue
         # 更新日志字段为业务代码实际位置
         record.update(
