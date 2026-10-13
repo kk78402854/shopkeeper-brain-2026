@@ -11,12 +11,12 @@ from processor.import_processor.state import ImportGraphState
 from utils.clients.milvus_utils import get_milvus_client
 from utils.task_utils import add_running_task, add_done_task
 
-"""
-步骤 1: 校验并获取 embeddings_content
-从 state 中取 embeddings_content，若为空则记录日志并抛异常终止。
-"""
 @step_log("step_1_validate_get_data")
 def step_1_validate_get_data(state):
+    """
+    步骤 1: 校验并获取 embeddings_content
+    从 state 中取 embeddings_content，若为空则记录日志并抛异常终止。
+    """
     #从状态中获取 embeddings_content
     embeddings_content = state.get("embeddings_content")
     #判断是否存在
@@ -25,13 +25,13 @@ def step_1_validate_get_data(state):
         raise ValueError(f"embeddings_content没有值,业务无法继续,提前终止!")
     return embeddings_content
 
-"""
-步骤 2: 准备 chunk 集合
-确保 Milvus 中用于存储 chunk 的集合存在：
-已存在则直接复用，不存在则创建 schema、索引并建集合。
-"""
 @step_log("step_2_prepared_item_name_collection")
 def step_2_prepared_item_name_collection():
+    """
+    步骤 2: 准备 chunk 集合
+    确保 Milvus 中用于存储 chunk 的集合存在：
+    已存在则直接复用，不存在则创建 schema、索引并建集合。
+    """
     #获取操作 milvus 的客户端
     milvus_client = get_milvus_client()
     #判断集合是否存在：存在直接用，不存在继续执行创建操作
@@ -85,13 +85,13 @@ def step_2_prepared_item_name_collection():
     )
     logger.success(f"集合{milvus_config.chunks_collection}创建成功")
 
-"""
-步骤 3: 向 Milvus 插入 chunk 数据
-业务逻辑：同一份文档重新入库时，先删掉它的旧数据，再插入新数据，
-保证一个文件在库里只保留最新的一份，避免重复。
-"""
 @step_log("step_3_insert_item_name_data")
 def step_3_insert_item_name_data(embeddings_content):
+    """
+    步骤 3: 向 Milvus 插入 chunk 数据
+    业务逻辑：同一份文档重新入库时，先删掉它的旧数据，再插入新数据，
+    保证一个文件在库里只保留最新的一份，避免重复。
+    """
     #获取 milvus 客户端
     milvus_client = get_milvus_client()
     # embeddings_content 是同一份文档切出来的所有 chunk，结构类似：

@@ -29,14 +29,14 @@ ITEM_NAME_CONTEXT_CHUNK_K = 5
 # 主体识别上下文总字符数上限：防止上下文过长导致大模型输入超限
 ITEM_NAME_CONTEXT_TOTAL_MAX_CHARS = 2000
 
-"""
-步骤 1: 获取输入并校验
-从 State 中提取 chunks 和 file_title，并进行基础校验：
-- 若 chunks 为空，则尝试从 md_path 对应的 JSON 备份文件中恢复；
-- 若 file_title 为空，则用 md_path 的文件名（去后缀）作为默认标题。
-"""
 @step_log("step_1_validata_and_get_data")
 def step_1_validata_and_get_data(state)->tuple[list[dict[str,Any]],str]:
+    """
+    步骤 1: 获取输入并校验
+    从 State 中提取 chunks 和 file_title，并进行基础校验：
+    - 若 chunks 为空，则尝试从 md_path 对应的 JSON 备份文件中恢复；
+    - 若 file_title 为空，则用 md_path 的文件名（去后缀）作为默认标题。
+    """
     #从State中取出chunks(可能是已切好的结果，也可能是空)
     chunks: list[dict[str,Any]] = state.get("chunks")
     #从State中取出文件标题（可能为空）
@@ -77,15 +77,14 @@ def step_1_validata_and_get_data(state)->tuple[list[dict[str,Any]],str]:
     # 返回校验/恢复后的 chunks 与 file_title
     return chunks, file_title
 
-"""
-# 步骤 2: 调用大模型识别 item_name
-# 从切分后的 chunks 中取前若干个作为上下文，拼接提示词后调用 LLM，
-# 让模型基于 file_title 和上下文推断出条目名称（item_name）；
-# 若模型返回为空，则回退使用 file_title。
-"""
-
 @step_log("step_2_call_llm_return_item_name")
 def step_2_call_llm_return_item_name(chunks, file_title):
+    """
+    # 步骤 2: 调用大模型识别 item_name
+    # 从切分后的 chunks 中取前若干个作为上下文，拼接提示词后调用 LLM，
+    # 让模型基于 file_title 和上下文推断出条目名称（item_name）；
+    # 若模型返回为空，则回退使用 file_title。
+    """
     #创建模型对象(返回一个可调用的LLM客户端)
     llm_model = get_llm_client()
     #准备提示词模板需要的参数：上下文文本初始为空
@@ -120,24 +119,24 @@ def step_2_call_llm_return_item_name(chunks, file_title):
     # 返回识别结果（或回退值）
     return item_name
 
-"""
-步骤 3: 将识别出来的item_name回调到chunk中
-"""
 @step_log("step_3_padding_item_name_to_chunks")
 def step_3_padding_item_name_to_chunks(chunks, item_name):
+    """
+    步骤 3: 将识别出来的item_name回调到chunk中
+    """
     # 遍历所有 chunk，为每个 chunk 补充 item_name 字段
     for chunk in chunks:
         chunk["item_name"] = item_name
 
-"""
-步骤 4: 准备 item_name 集合
-确保 Milvus 中用于存储 item_name 的 collection 已存在：
-- 若已存在，直接复用；
-- 若不存在，则创建 schema、索引并建集合。
-该集合用于存放条目名称及其向量，便于后续按条目检索。
-"""
 @step_log("step_4_prepared_item_name_collection")
 def step_4_prepared_item_name_collection():
+    """
+    步骤 4: 准备 item_name 集合
+    确保 Milvus 中用于存储 item_name 的 collection 已存在：
+    - 若已存在，直接复用；
+    - 若不存在，则创建 schema、索引并建集合。
+    该集合用于存放条目名称及其向量，便于后续按条目检索。
+    """
     #获取操作 Milvus 数据库的客服端
     milvus_client = get_milvus_client()
     #判断集合是否存在：存在则直接复用，不存在才走创建流程

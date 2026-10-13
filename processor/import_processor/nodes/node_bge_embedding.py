@@ -13,16 +13,16 @@ from utils.task_utils import add_running_task, add_done_task
 # 向量化批次大小：每批处理 5 条切片，避免显存溢出
 EMBEDDING_BATCH_SIZE = 5
 
-"""
-步骤 1: 校验并获取 chunks 数据
-获取策略（优先级从高到低）：
-  1. 优先从 state 中直接取 chunks；
-  2. 若 state 中没有 chunks，则尝试从 md_path 同目录下的 JSON 备份文件中恢复，
-     并为恢复出来的每个 chunk 补充 item_name 属性；
-  3. 若两条路径都取不到数据，则记录错误日志并抛异常终止流程。
-"""
 @step_log("step_1_validate_and_get_data")
 def step_1_validate_and_get_data(state):
+    """
+    步骤 1: 校验并获取 chunks 数据
+    获取策略（优先级从高到低）：
+      1. 优先从 state 中直接取 chunks；
+      2. 若 state 中没有 chunks，则尝试从 md_path 同目录下的 JSON 备份文件中恢复，
+         并为恢复出来的每个 chunk 补充 item_name 属性；
+      3. 若两条路径都取不到数据，则记录错误日志并抛异常终止流程。
+    """
     #从状态中获取chunks数据
     chunks = state.get("chunks")
 
@@ -51,15 +51,15 @@ def step_1_validate_and_get_data(state):
             raise ValueError(f"chunks没有值,同时也没有读取到对应md_path,抛出异常!")
     return chunks
 
-"""
-步骤 2: 批量生成向量
-把每个 chunk 的 item_name 和 content 拼接后做向量化，
-将生成的稠密向量和稀疏向量回填到对应 chunk 中。
-采用攒批方式处理，避免一次性拼接全部内容导致内存压力，
-也避免逐条调用模型导致交互过于频繁。
-"""
 @step_log("step_2_generate_vector")
 def step_2_batch_generate_vector(chunks):
+    """
+    步骤 2: 批量生成向量
+    把每个 chunk 的 item_name 和 content 拼接后做向量化，
+    将生成的稠密向量和稀疏向量回填到对应 chunk 中。
+    采用攒批方式处理，避免一次性拼接全部内容导致内存压力，
+    也避免逐条调用模型导致交互过于频繁。
+    """
     # 攒批处理
     # chunks [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17...]
     # 批处理思路:  [<1,2,3,4,5>,<6,7,8,9,10>,<11,12,13,14,15>,<16,17...>]
