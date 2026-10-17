@@ -10,12 +10,23 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import JsonOutputParser
 
+from common.config.milvus_config import milvus_config
 from common.logging.logger import node_log, logger, step_log
 from processor.query_processor.state import QueryGraphState
+from utils.clients.milvus_utils import create_hybrid_search_requests, get_milvus_client, hybrid_search
 from utils.clients.mongo_history_utils import save_chat_message, get_recent_messages
+from utils.lm.embedding_utils import generate_embeddings
 from utils.lm.lm_utils import get_llm_client
 from utils.load_prompt import load_prompt
 from utils.task_utils import add_running_task, add_done_task
+
+# 主体名称确认阈值：高于该分数 → 直接确认 [0.75]
+ITEM_NAME_CONFIRM_THRESHOLD = 0.70
+# 主体名称候选阈值：介于两者之间 → 让用户选择
+ITEM_NAME_CANDIDATE_THRESHOLD = 0.60
+# 给用户选择时，最多展示几个候选
+ITEM_NAME_OPTIONS_TOPK = 2
+ITEM_NAME_CONFIRMED_TOPK = 1
 
 @step_log("step_1_validate_and_get_data")
 def step_1_validate_and_get_data(state):
@@ -147,6 +158,258 @@ def step_3_call_llm_rewritten_and_extract_itemnames(history_list, original_query
     # 返回包含重写查询和商品名称的字典
     return json_dict
 
+@step_log("step_4_select_item_names_milvus")
+def step_4_select_item_names_milvus(item_names) -> dict[str, list[dict]]:
+    """
+        对 LLM 识别出的主体名称进行向量化，并在 Milvus 的商品名称集合中进行混合检索。
+    功能说明：
+        1. 将 LLM 抽取出的主体名称列表批量生成 dense/sparse 向量；
+        2. 对每个主体名称分别构造稠密 + 稀疏混合检索请求；
+        3. 到 Milvus 的 item_name_collection 中检索相似商品名称；
+        4. 返回“原始主体名称 -> 候选商品名称及相似度分数列表”的映射。
+    参数:
+        item_names: list[str]
+            LLM 从用户问题中识别出的主体名称列表，例如：
+            ["商品A", "商品B"]
+    返回值:
+        dict[str, list[dict]]
+            每个原始主体名称对应一个候选结果列表，结构示例：
+            {
+                "商品A": [
+                    {"item_name": "商品A", "score": 0.83},
+                    {"item_name": "商品a", "score": 0.73},
+                    {"item_name": "商品ab", "score": 0.56}
+                ],
+                "商品B": [
+                    {"item_name": "商品B", "score": 0.83},
+                    {"item_name": "商品ab", "score": 0.73},
+                    {"item_name": "商品ababa", "score": 0.56}
+                ]
+            }
+    注意:
+        - score 来自 Milvus 返回的 distance 字段；
+        - 当前 hybrid_search 使用 norm_score=True，因此 score 可理解为归一化后的融合相似度分数，
+          通常分数越高表示越相似；
+        - 后续 step_5 会基于 ITEM_NAME_CONFIRM_THRESHOLD 和 ITEM_NAME_CANDIDATE_THRESHOLD
+          判断哪些候选是“确认主体”，哪些是“可选主体”。
+    :param param:
+    :return:
+    """
+    # 用于接收最终返回结果：原始主体名称 -> 候选商品名称及分数列表。
+    milvus_search_result_dict: dict[str, list[dict]] = {}
+
+    # 批量生成稠密和稀疏向量，dense/sparse 顺序与 item_names 一致。
+    result = generate_embeddings(item_names)
+
+    # 遍历每一个 LLM 识别出的主体名称。
+    for index, llm_item_name in enumerate(item_names):
+        # 根据当前下标获取该主体的稠密向量。
+        dense_vector = result.get("dense")[index]
+
+        # 根据当前下标获取该主体的稀疏向量。
+        sparse_vector = result.get("sparse")[index]
+
+        # 封装同时包含稠密和稀疏向量的混合检索请求。
+        reqs_list = create_hybrid_search_requests(
+            dense_vector=dense_vector,
+            sparse_vector=sparse_vector
+        )
+
+        # 在商品名称集合中执行混合检索，并只返回 item_name 字段。
+        response = hybrid_search(
+            client=get_milvus_client(),
+            collection_name=milvus_config.item_name_collection,
+            reqs=reqs_list,
+            ranker_weights=(0.4, 0.6),
+            norm_score=True,
+            output_fields=["item_name"]
+        )
+
+        # 取当前主体对应的检索结果列表。
+        real_response = response[0]
+
+        # 如果当前主体无检索结果，则记录警告并跳出所有查询。
+        if not real_response:
+            logger.warning(
+                f"根据item_name:{llm_item_name}进行向量数据库的相似度搜索,值为空,"
+                f"向量数据库为空,跳出所有查询!"
+            )
+            break
+
+        # 用于存放当前主体的候选商品名称及相似度分数。
+        item_name_score_list: list[dict] = []
+
+        # 将 Milvus 返回结构转换为 {"item_name": xxx, "score": xxx}。
+        for item in real_response:
+            # 注意：entity 默认值原逻辑为 []，缺失时再 .get 有风险，后续可改为 {}。
+            item_name_score_list.append({
+                "item_name": item.get("entity", []).get("item_name"),
+                "score": item.get("distance")
+            })
+
+        # 保存当前原始主体名称对应的候选结果列表。
+        milvus_search_result_dict[llm_item_name] = item_name_score_list
+
+    # 返回所有主体名称对应的 Milvus 检索结果。
+    return milvus_search_result_dict
+
+@step_log("step_5_select_confirmed_and_option_item_names")
+def step_5_select_confirmed_and_option_item_names(milvus_dict):
+    """
+    根据 Milvus 混合检索结果，将候选商品名称划分为“确认主体”和“可选主体”。
+
+    功能：
+        1. 遍历每个 LLM 原始主体名称对应的候选商品列表；
+        2. 分数 >= ITEM_NAME_CONFIRM_THRESHOLD 的候选进入 confirmed_list；
+        3. ITEM_NAME_CANDIDATE_THRESHOLD <= 分数 < ITEM_NAME_CONFIRM_THRESHOLD
+           的候选进入 option_list；
+        4. 每个主体优先取确认结果；无确认结果时再取可选结果。
+
+    参数:
+        milvus_dict: dict[str, list[dict]]
+            step_4 返回的检索结果，例如：
+            {
+                "商品A": [
+                    {"item_name": "商品A", "score": 0.83},
+                    {"item_name": "商品a", "score": 0.73},
+                    {"item_name": "商品ab", "score": 0.56}
+                ],
+                "商品B": [
+                    {"item_name": "商品B", "score": 0.83},
+                    {"item_name": "商品ab", "score": 0.73}
+                ]
+            }
+
+    返回:
+        dict[str, list[str]]
+            {
+                "confirmed": ["商品A", "商品B"],
+                "option": ["商品a", "商品ab"]
+            }
+
+    注意:
+        confirmed 表示可直接确认的主体；
+        option 表示分数处于候选区间、需要用户进一步明确的主体；
+        当前逻辑中，若某主体存在 high_list，则不会再处理该主体的 middle_list。
+    """
+
+    confirmed_list: list[str] = []  # 确认的 item_name 列表。
+    option_list: list[str] = []  # 可选的 item_name 列表。
+
+    # 遍历每个 LLM 原始主体名称及其 Milvus 候选结果列表。
+    for llm_item_name, item_name_score_list in milvus_dict.items():
+        # 提取分数达到确认阈值的候选商品名称。
+        high_list = [
+            item.get("item_name")
+            for item in item_name_score_list
+            if item.get("score") >= ITEM_NAME_CONFIRM_THRESHOLD
+        ]
+        # 提取分数处于候选区间的候选商品名称。
+        middle_list = [
+            item.get("item_name")
+            for item in item_name_score_list
+            if ITEM_NAME_CANDIDATE_THRESHOLD <= item.get("score", 0.0) < ITEM_NAME_CONFIRM_THRESHOLD
+        ]
+
+        # 有可信主体时，取前 ITEM_NAME_CONFIRMED_TOPK 个加入确认列表。
+        if high_list:
+            confirmed_list.extend(high_list[:ITEM_NAME_CONFIRMED_TOPK])
+            logger.info(f"{llm_item_name}已经获取到可信的主体:{high_list[:ITEM_NAME_CONFIRMED_TOPK]}")
+            continue
+
+        # 无可信主体但有可选主体时，取前 ITEM_NAME_OPTIONS_TOPK 个加入可选列表。
+        if middle_list:
+            option_list.extend(middle_list[:ITEM_NAME_OPTIONS_TOPK])
+            logger.info(f"{llm_item_name}没有可信的主体,但是有可选的主体:{middle_list[:ITEM_NAME_OPTIONS_TOPK]}")
+
+    # 返回确认主体列表和可选主体列表。
+    return {
+        "confirmed": confirmed_list,
+        "option": option_list
+    }
+
+@step_log("step_6_change_state_property")
+def step_6_change_state_property(state, rewritten_query, confirmed_option_dict):
+    """
+    根据 step_5 的确认/可选结果更新图状态 state。
+
+    功能：
+        1. 若存在确认主体列表，则写入 state["item_names"] 和 state["rewritten_query"]；
+        2. 若不存在确认主体但存在可选主体，则写入 state["answer"] 提示用户明确；
+        3. 若确认主体和可选主体都不存在，则写入 state["answer"] 提示重新提问。
+
+    参数:
+        state: QueryGraphState
+            当前查询图状态。
+        rewritten_query: str
+            LLM 改写后的问题。
+        confirmed_option_dict: dict[str, list[str]]
+            step_5 返回结果，例如：
+            {
+                "confirmed": ["商品A", "商品B"],
+                "option": ["商品a", "商品ab"]
+            }
+
+    返回:
+        None
+            本函数直接原地修改 state，不返回新状态。
+
+    注意:
+        三种场景互斥：确认列表优先；无确认时看可选；两者都无则提示重新提问。
+    """
+
+    # 获取确认主体列表，缺失时默认为空列表。
+    confirmed_list = confirmed_option_dict.get("confirmed", [])
+    # 获取可选主体列表，缺失时默认为空列表。
+    option_list = confirmed_option_dict.get("option", [])
+
+    # 场景1：存在确认主体，更新 item_names 和 rewritten_query。
+    if confirmed_list:
+        state["item_names"] = confirmed_list  # expr= item_name in [sp_a,sp_b,sp_c]
+        state["rewritten_query"] = rewritten_query
+        logger.info(f"已经有明确的item_name列表,已经更新state item_name以及rewritten_query属性!")
+        return
+    # 场景2：无确认主体但有可选主体，更新 answer 提示用户明确。
+    if option_list:
+        state['answer'] = f"没有可信的item_name,但是有可选的:{option_list},请您明确!"
+        logger.info(f"没有明确的item_name列表,但是有可选的!已经更新answer属性!")
+        return
+    # 场景3：确认主体和可选主体都不存在，更新 answer 提示重新提问。
+    state['answer'] = f"没有可信,也没有可选的实体列表,请明确以后再次问题!!"
+
+
+@step_log("step_7_save_user_chat_message")
+def step_7_save_user_chat_message(state):
+    """
+    将当前用户问题及相关状态保存到 MongoDB 聊天记录。
+
+    功能：
+        保存 session_id、用户原始问题、改写后问题、确认主体列表及图片列表。
+
+    参数:
+        state: QueryGraphState
+            当前查询图状态，需包含 session_id、original_query、
+            rewritten_query、item_names 等字段。
+
+    返回:
+        None
+
+    注意:
+        text 使用 original_query，前端展示的是用户原始问题；
+        item_names 缺失时默认为空列表；
+        当前不保存图片，image_urls 固定为空列表。
+    """
+
+    # 保存用户聊天消息到 MongoDB。
+    save_chat_message(
+        session_id=state.get("session_id"),
+        role="user",
+        text=state.get("original_query"),  # 前端显示的就是这个字段
+        rewritten_query=state.get("rewritten_query"),
+        item_names=state.get("item_names", []),
+        image_urls=[]
+    )
+
 @node_log("node_item_name_confirm")
 def node_item_name_confirm(state:QueryGraphState):
     """
@@ -160,10 +423,16 @@ def node_item_name_confirm(state:QueryGraphState):
     history_list: list[dict] = step_2_get_history_by_session_id(session_id)
     # TODO 4.根据历史记录，调用大语言模型进行意图识别以及问题重写
     llm_dict: dict[str,Any] = step_3_call_llm_rewritten_and_extract_itemnames(history_list,original_query)
-    # TODO 5.对查询出来的主题进行向量化操作--先嵌入到 milvus 中 kb_item_names表，查询数据
-    # TODO 6.根据向量数据库查询的结果 讲数据放到确认、可选列表中
+    confirmed_option_dict = {}
+    if llm_dict.get("item_names"):
+        # TODO 5. 对查询出来的主体进行向量化操作--先嵌入，到milvus中kb_item_names表，查询数据
+        milvus_dict: dict[str, list[dict]] = step_4_select_item_names_milvus(llm_dict.get("item_names"))
+        # TODO 6. 根据向量数据库查询的结果  将数据放到确认、可选列表中--->{"confirmed":["商品A","商品B"],"option":[xx,xxx,xxx]}
+        confirmed_option_dict: dict[str, list[str]] = step_5_select_confirmed_and_option_item_names(milvus_dict)
     # TODO 7.更新状态
+    step_6_change_state_property(state, llm_dict.get("rewritten_query"), confirmed_option_dict)
     # TODO 8.讲用户问题保存到 mongodb 数据库
+    step_7_save_user_chat_message(state)
     # TODO 9.添加节点到已完成列表
     add_done_task(state.get("session_id"), sys._getframe().f_code.co_name, state.get("is_stream"))
     return state
@@ -171,7 +440,7 @@ def node_item_name_confirm(state:QueryGraphState):
 if __name__ == "__main__":
     mock_state = {
         "session_id": "test_session_001",
-        "original_query": "HAK 180 烫金机怎么用？",
+        "original_query": "苹果手机怎么用？",
         "is_stream": False,
     }
     result_state = node_item_name_confirm(mock_state)
