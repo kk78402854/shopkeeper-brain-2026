@@ -440,7 +440,7 @@ def node_item_name_confirm(state:QueryGraphState):
 if __name__ == "__main__":
     mock_state = {
         "session_id": "test_session_001",
-        "original_query": "苹果手机怎么用？",
+        "original_query": "AAA 190 烫银机 xxx怎么用？",
         "is_stream": False,
     }
     result_state = node_item_name_confirm(mock_state)
